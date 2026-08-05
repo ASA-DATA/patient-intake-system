@@ -4,7 +4,7 @@ from app.core.config import settings
 from sqlalchemy import text
 from app.core.database import AsyncSessionFactory
 from app.routers.appointments import router as appointments_router
-
+from app.routers.intake import router as intake_router
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -12,6 +12,7 @@ app = FastAPI(
 )
 
 app.include_router(appointments_router)
+app.include_router(intake_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],

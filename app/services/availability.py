@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.models.appointment import Appointment, AppointmentStatus
 from app.schemas.appointment import AvailableSlot
 
+from fastapi import HTTPException, status
 
 async def get_available_slots(
     db: AsyncSession,
@@ -91,3 +92,73 @@ async def get_available_slots(
             current_start += duration
 
     return available_slots
+
+from fastapi import HTTPException, status
+def validate_requested_slot(
+    starts_at: datetime,
+) -> tuple[datetime, datetime]:
+    clinic_timezone = ZoneInfo(settings.clinic_timezone)
+
+    local_start = starts_at.astimezone(clinic_timezone)
+    now = datetime.now(clinic_timezone)
+
+    if local_start <= now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El horario solicitado ya pasó.",
+        )
+
+    if local_start.weekday() >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Las citas solo están disponibles de lunes a viernes.",
+        )
+
+    if local_start.minute != 0 or local_start.second != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La cita debe comenzar en una hora exacta.",
+        )
+
+    duration = timedelta(
+        minutes=settings.appointment_duration_minutes
+    )
+
+    local_end = local_start + duration
+
+    opening_datetime = datetime.combine(
+        local_start.date(),
+        time(hour=settings.opening_hour),
+        tzinfo=clinic_timezone,
+    )
+
+    closing_datetime = datetime.combine(
+        local_start.date(),
+        time(hour=settings.closing_hour),
+        tzinfo=clinic_timezone,
+    )
+
+    if (
+        local_start < opening_datetime
+        or local_end > closing_datetime
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "El horario está fuera del horario de atención."
+            ),
+        )
+
+    maximum_date = now.date() + timedelta(
+        days=settings.availability_days
+    )
+
+    if local_start.date() > maximum_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "La cita está fuera del periodo disponible."
+            ),
+        )
+
+    return local_start, local_end
