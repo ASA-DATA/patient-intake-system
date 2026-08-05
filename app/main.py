@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from sqlalchemy import text
 from app.core.database import AsyncSessionFactory
-
+from app.routers.appointments import router as appointments_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -11,7 +11,7 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-
+app.include_router(appointments_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],
