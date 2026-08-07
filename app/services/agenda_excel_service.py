@@ -3,7 +3,7 @@ from io import BytesIO
 from openpyxl import (Workbook,load_workbook)
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-
+from zoneinfo import ZoneInfo
 from app.core.config import settings
 from app.integrations.google_drive import (
     download_file,
@@ -11,6 +11,7 @@ from app.integrations.google_drive import (
     update_excel_file,
     upload_excel,
 )
+from zoneinfo import ZoneInfo
 from app.models.appointment import Appointment
 from app.models.patient import Patient
 
@@ -152,6 +153,19 @@ def add_appointment_to_agenda(
         if current_id == appointment_id:
             return agenda_bytes
 
+    # Convertir la cita a la zona horaria local del consultorio
+    clinic_timezone = ZoneInfo(
+        settings.clinic_timezone
+    )
+
+    local_start = appointment.starts_at.astimezone(
+        clinic_timezone
+    )
+
+    local_end = appointment.ends_at.astimezone(
+        clinic_timezone
+    )
+
     next_row = sheet.max_row + 1
 
     sheet.cell(
@@ -163,19 +177,23 @@ def add_appointment_to_agenda(
     sheet.cell(
         row=next_row,
         column=2,
-        value=appointment.starts_at.date(),
+        value=local_start.date(),
     )
 
     sheet.cell(
         row=next_row,
         column=3,
-        value=appointment.starts_at.time(),
+        value=local_start.time().replace(
+            tzinfo=None
+        ),
     )
 
     sheet.cell(
         row=next_row,
         column=4,
-        value=appointment.ends_at.time(),
+        value=local_end.time().replace(
+            tzinfo=None
+        ),
     )
 
     sheet.cell(
@@ -199,7 +217,11 @@ def add_appointment_to_agenda(
     expediente_cell = sheet.cell(
         row=next_row,
         column=8,
-        value="Abrir expediente" if expediente_url else "",
+        value=(
+            "Abrir expediente"
+            if expediente_url
+            else ""
+        ),
     )
 
     if expediente_url:
@@ -234,6 +256,7 @@ def add_appointment_to_agenda(
     output.seek(0)
 
     return output.getvalue()
+
 
 def sync_new_appointment_to_agenda(
     appointment: Appointment,
@@ -274,6 +297,120 @@ def sync_new_appointment_to_agenda(
         appointment=appointment,
         patient=patient,
         expediente_url=expediente_url,
+    )
+
+    return update_excel_file(
+        file_id=existing_file["id"],
+        excel_bytes=updated_bytes,
+    )
+
+def update_appointment_in_agenda(
+    agenda_bytes: bytes,
+    appointment: Appointment,
+) -> bytes:
+    workbook = load_workbook(
+        BytesIO(agenda_bytes)
+    )
+
+    sheet = workbook["Agenda"]
+
+    appointment_id = str(appointment.id)
+
+    target_row = None
+
+    for row in range(2, sheet.max_row + 1):
+        current_id = sheet.cell(
+            row=row,
+            column=1,
+        ).value
+
+        if current_id == appointment_id:
+            target_row = row
+            break
+
+    if target_row is None:
+        raise RuntimeError(
+            f"La cita {appointment_id} no existe en agenda.xlsx."
+        )
+    clinic_timezone = ZoneInfo(settings.clinic_timezone)
+
+    local_start = appointment.starts_at.astimezone(clinic_timezone)
+
+    local_end = appointment.ends_at.astimezone(
+    clinic_timezone
+)
+
+    sheet.cell(
+    row=target_row,
+    column=2,
+    value=local_start.date(),
+)
+
+    sheet.cell(
+    row=target_row,
+    column=3,
+    value=local_start.time().replace(tzinfo=None),
+)
+
+    sheet.cell(
+    row=target_row,
+    column=4,
+    value=local_end.time().replace(tzinfo=None),
+)
+    sheet.cell(
+        row=target_row,
+        column=7,
+        value=appointment.status.value,
+    )
+
+    sheet.cell(
+        row=target_row,
+        column=2,
+    ).number_format = "dd/mm/yyyy"
+
+    sheet.cell(
+        row=target_row,
+        column=3,
+    ).number_format = "hh:mm"
+
+    sheet.cell(
+        row=target_row,
+        column=4,
+    ).number_format = "hh:mm"
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    return output.getvalue()
+
+def sync_updated_appointment_to_agenda(
+    appointment: Appointment,
+) -> dict[str, str]:
+    folder_id = settings.google_drive_agenda_folder_id
+
+    if not folder_id:
+        raise RuntimeError(
+            "Falta GOOGLE_DRIVE_AGENDA_FOLDER_ID."
+        )
+
+    existing_file = find_file_in_folder(
+        filename=AGENDA_FILENAME,
+        folder_id=folder_id,
+    )
+
+    if existing_file is None:
+        raise RuntimeError(
+            "agenda.xlsx no existe en Google Drive."
+        )
+
+    agenda_bytes = download_file(
+        existing_file["id"]
+    )
+
+    updated_bytes = update_appointment_in_agenda(
+        agenda_bytes=agenda_bytes,
+        appointment=appointment,
     )
 
     return update_excel_file(
