@@ -12,9 +12,16 @@ from app.schemas.appointment import (
     RescheduleAppointmentResponse,
 )
 from app.services.appointment_service import (
-    reschedule_appointment,
+    reschedule_appointment, cancel_appointment,
 )
 
+from app.schemas.appointment import (
+    CancelAppointmentResponse,
+)
+
+from app.services.appointment_service import (
+    cancel_appointment,
+)
 router = APIRouter(
     prefix="/api/appointments",
     tags=["Appointments"],
@@ -49,3 +56,17 @@ async def reschedule(
         appointment_id=appointment_id,
         new_starts_at=payload.starts_at,
     )
+
+@router.patch(
+    "/{appointment_id}/cancel",
+    response_model=CancelAppointmentResponse,
+)
+async def cancel(
+    appointment_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> CancelAppointmentResponse:
+    return await cancel_appointment(
+        db=db,
+        appointment_id=appointment_id,
+    )
+
