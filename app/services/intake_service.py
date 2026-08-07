@@ -23,6 +23,9 @@ from app.services.excel_service import (
     create_patient_workbook,
     create_safe_filename,
 )
+from app.services.agenda_excel_service import (
+    sync_new_appointment_to_agenda,
+)
 
 logger = logging.getLogger(__name__)
 ALARM_KEYS = {
@@ -257,6 +260,21 @@ async def create_intake_submission(
         "para la valoración %s.",
         submission.id,
     )       
+    # AQUÍ VA LA SINCRONIZACIÓN CON agenda.xlsx
+    if appointment is not None:
+        try:
+            sync_new_appointment_to_agenda(
+            appointment=appointment,
+            patient=patient,
+            expediente_url=submission.excel_web_view_link,
+        )
+
+        except Exception:
+            logger.exception(
+            "No fue posible agregar la cita %s "
+            "a agenda.xlsx.",
+            appointment.id,
+        )
 
     return IntakeSubmissionResponse(
         submission_id=str(submission.id),
