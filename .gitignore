@@ -5,3 +5,6 @@ __pycache__/
 credentials/
 .pytest_cache/
 .vscode/
+
+credentials/*
+!credentials/.gitkeep

@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     google_drive_folder_id: str | None = None
     google_calendar_id: str | None = None
     google_service_account_file: str | None = None
+    google_drive_expedientes_folder_id: str | None = None
+    google_drive_agenda_folder_id: str | None = None
 
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None

@@ -3,7 +3,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-
 class PatientData(BaseModel):
     full_name: str = Field(min_length=3, max_length=200)
     age: int = Field(ge=1, le=120)
@@ -22,7 +21,6 @@ class PatientData(BaseModel):
 
         return value
 
-
 class AppointmentRequest(BaseModel):
     requested: bool
     starts_at: datetime | None = None
@@ -40,7 +38,6 @@ class AppointmentRequest(BaseModel):
 
         return value
 
-
 class ConsentData(BaseModel):
     privacy_consent: bool
     whatsapp_consent: bool
@@ -54,7 +51,6 @@ class ConsentData(BaseModel):
             )
 
         return value
-
 
 class IntakeSubmissionRequest(BaseModel):
     patient: PatientData
@@ -78,16 +74,21 @@ class IntakeSubmissionRequest(BaseModel):
 
         return value
 
-
 class AppointmentResult(BaseModel):
     status: Literal["not_requested", "confirmed"]
     starts_at: datetime | None = None
     ends_at: datetime | None = None
-
-
+class ExcelUploadResult(BaseModel):
+    status: Literal["uploaded", "failed"]
+    filename: str
+    file_id: str | None = None
+    web_view_link: str | None = None
+    error: str | None = None    
 class IntakeSubmissionResponse(BaseModel):
     submission_id: str
     patient_id: str
     appointment: AppointmentResult
     alarm_flag: bool
     message: str
+    excel: ExcelUploadResult
+    message: str    

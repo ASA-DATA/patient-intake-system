@@ -1,7 +1,13 @@
 import uuid
 from datetime import date, datetime
-
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -65,4 +71,30 @@ class IntakeSubmission(Base):
         "Appointment",
         back_populates="intake_submission",
         uselist=False,
+    )
+
+    excel_upload_status: Mapped[str] = mapped_column(
+    String(30),
+    nullable=False,
+    default="pending",
+    )
+
+    excel_filename: Mapped[str | None] = mapped_column(
+    String(300),
+    nullable=True,
+    )
+
+    excel_file_id: Mapped[str | None] = mapped_column(
+    String(300),
+    nullable=True,
+    )
+
+    excel_web_view_link: Mapped[str | None] = mapped_column(
+    String(1000),
+    nullable=True,
+    )
+
+    excel_upload_error: Mapped[str | None] = mapped_column(
+    String(1000),
+    nullable=True,
     )
