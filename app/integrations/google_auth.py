@@ -10,9 +10,8 @@ TOKEN_FILE = BASE_DIR / "credentials" / "token.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/calendar",
 ]
-
-
 def get_google_credentials() -> Credentials:
     if not TOKEN_FILE.exists():
         raise FileNotFoundError(

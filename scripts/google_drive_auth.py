@@ -19,8 +19,8 @@ TOKEN_FILE = (
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/calendar",
 ]
-
 
 def main() -> None:
     if not CLIENT_FILE.exists():

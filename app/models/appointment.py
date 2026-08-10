@@ -7,9 +7,10 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     String,
-    UniqueConstraint,
+    Index,
     func,
 )
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,11 +40,15 @@ class Appointment(Base):
     __tablename__ = "appointments"
 
     __table_args__ = (
-        UniqueConstraint(
-            "starts_at",
-            name="uq_appointments_starts_at",
+    Index(
+        "uq_appointments_active_starts_at",
+        "starts_at",
+        unique=True,
+        postgresql_where=text(
+            "status IN ('pending', 'confirmed')"
         ),
-    )
+    ),
+)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -112,3 +117,16 @@ class Appointment(Base):
         "IntakeSubmission",
         back_populates="appointment",
     )
+
+    google_calendar_event_id: Mapped[str | None] = mapped_column(
+    String(255),
+    nullable=True,)
+
+    google_calendar_event_link: Mapped[str | None] = mapped_column(
+    String(1000),
+    nullable=True,)
+
+    google_calendar_sync_status: Mapped[str] = mapped_column(
+    String(30),
+    nullable=False,
+    default="pending",)

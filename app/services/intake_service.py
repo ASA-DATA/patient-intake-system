@@ -26,6 +26,12 @@ from app.services.excel_service import (
 from app.services.agenda_excel_service import (
     sync_new_appointment_to_agenda,
 )
+from app.services.intake_excel_service import (
+    generate_and_upload_intake_excel,
+)
+from app.services.calendar_service import (
+    sync_new_appointment_to_calendar,
+)
 
 logger = logging.getLogger(__name__)
 ALARM_KEYS = {
@@ -165,101 +171,14 @@ async def create_intake_submission(
                 "Seleccione uno diferente."
             ),
         ) from exc
-
-    # PostgreSQL ya quedó confirmado al salir de db.begin().
-    # A partir de aquí generamos y subimos el Excel.
-
-    safe_name = create_safe_filename(patient.full_name)
-
-    filename = (
-        f"{safe_name}_"
-        f"{submission.assessment_date}_"
-        f"{str(submission.id)[:8]}.xlsx"
+    excel_result, response_message = (
+    await generate_and_upload_intake_excel(
+        db=db,
+        patient=patient,
+        submission=submission,
+        appointment=appointment,
     )
-
-    try:
-        excel_bytes = create_patient_workbook(
-            patient=patient,
-            submission=submission,
-            appointment=appointment,
-        )
-
-        uploaded_file = upload_excel(
-            excel_bytes=excel_bytes,
-            filename=filename,
-        )
-        submission.excel_upload_status = "uploaded"
-        submission.excel_filename = filename
-        submission.excel_file_id = uploaded_file["file_id"]
-        submission.excel_web_view_link = uploaded_file.get("web_view_link")
-        submission.excel_upload_error = None
-
-        excel_result = ExcelUploadResult(
-            status="uploaded",
-            filename=filename,
-            file_id=uploaded_file["file_id"],
-            web_view_link=uploaded_file.get(
-                "web_view_link"
-            ),
-        )
-
-        response_message = (
-            "Formulario registrado y expediente subido "
-            "correctamente."
-        )
-
-    except Exception as exc:
-        logger.exception(
-            "No fue posible generar o subir el Excel "
-            "de la valoración %s.",
-            submission.id,
-        )
-        submission.excel_upload_status = "failed"
-        submission.excel_filename = filename
-        submission.excel_file_id = None
-        submission.excel_web_view_link = None
-        submission.excel_upload_error = ("No fue posible generar o subir el expediente "
-                                         "a Google Drive.")
-        excel_result = ExcelUploadResult(
-            status="failed",
-            filename=filename,
-            error=(
-                "El formulario quedó registrado, pero el "
-                "expediente no pudo subirse a Google Drive."
-            ),
-        )
-
-        response_message = (
-            "Formulario registrado correctamente, pero el "
-            "expediente requiere reintentar su subida."
-        )
-        db.add(submission)
-
-        try:
-           await db.commit()
-           await db.refresh(submission)
-        except Exception:
-           await db.rollback()
-
-           logger.exception(
-        "No fue posible guardar los metadatos del Excel "
-        "para la valoración %s.",
-        submission.id,
-    )
-
-    db.add(submission)
-
-    try:
-        await db.commit()
-        await db.refresh(submission)
-    except Exception:
-        await db.rollback()
-
-        logger.exception(
-        "No fue posible guardar los metadatos del Excel "
-        "para la valoración %s.",
-        submission.id,
-    )       
+)
     # AQUÍ VA LA SINCRONIZACIÓN CON agenda.xlsx
     if appointment is not None:
         try:
@@ -275,6 +194,13 @@ async def create_intake_submission(
             "a agenda.xlsx.",
             appointment.id,
         )
+
+    if appointment is not None:
+        await sync_new_appointment_to_calendar(
+            db=db,
+            appointment=appointment,
+            patient=patient,
+    )        
 
     return IntakeSubmissionResponse(
         submission_id=str(submission.id),
