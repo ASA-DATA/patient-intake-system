@@ -31,6 +31,16 @@ from app.services.calendar_service import (
     sync_rescheduled_appointment_to_calendar,
 )
 
+from app.models.patient import Patient
+from app.models.intake import IntakeSubmission
+
+from app.services.whatsapp_service import (
+    notify_clinic_cancelled_appointment,
+    notify_clinic_rescheduled_appointment,
+    notify_patient_cancelled_appointment,
+    notify_patient_rescheduled_appointment,
+)
+
 async def reschedule_appointment(
     db: AsyncSession,
     appointment_id: UUID,
@@ -54,6 +64,25 @@ async def reschedule_appointment(
             status_code=status.HTTP_409_CONFLICT,
             detail="No se puede reagendar una cita cancelada.",
         )
+
+    patient_result = await db.execute(
+    select(Patient).where(
+            Patient.id == appointment.patient_id
+        )
+    )
+
+    patient = patient_result.scalar_one()
+
+
+    submission_result = await db.execute(
+        select(IntakeSubmission).where(
+            IntakeSubmission.id
+            == appointment.intake_submission_id
+        )
+    )
+
+    submission = submission_result.scalar_one()
+
 
     local_start, local_end = validate_requested_slot(
         new_starts_at
@@ -108,6 +137,17 @@ async def reschedule_appointment(
     db=db,
     appointment=appointment,
 )
+
+    notify_clinic_rescheduled_appointment(
+    appointment=appointment,
+    patient=patient,
+)
+
+    notify_patient_rescheduled_appointment(
+    appointment=appointment,
+    patient=patient,
+    whatsapp_consent=submission.whatsapp_consent,
+)
     clinic_timezone = ZoneInfo(
     settings.clinic_timezone
 )
@@ -150,7 +190,28 @@ async def cancel_appointment(
             detail="La cita ya está cancelada.",
         )
 
+    # AQUÍ
+    patient_result = await db.execute(
+        select(Patient).where(
+            Patient.id == appointment.patient_id
+        )
+    )
+
+    patient = patient_result.scalar_one()
+
+    submission_result = await db.execute(
+        select(IntakeSubmission).where(
+            IntakeSubmission.id
+            == appointment.intake_submission_id
+        )
+    )
+
+    submission = submission_result.scalar_one()
+
     appointment.status = AppointmentStatus.cancelled
+
+
+
 
     try:
         await db.commit()
@@ -176,6 +237,16 @@ async def cancel_appointment(
     db=db,
     appointment=appointment,
 )
+
+    notify_clinic_cancelled_appointment(
+    appointment=appointment,
+    patient=patient,)
+
+    notify_patient_cancelled_appointment(
+    appointment=appointment,
+    patient=patient,
+    whatsapp_consent=submission.whatsapp_consent,)
+    
     clinic_timezone = ZoneInfo(
         settings.clinic_timezone
     )

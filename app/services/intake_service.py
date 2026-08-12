@@ -32,6 +32,10 @@ from app.services.intake_excel_service import (
 from app.services.calendar_service import (
     sync_new_appointment_to_calendar,
 )
+from app.services.whatsapp_service import (
+    notify_clinic_new_appointment,
+    notify_patient_new_appointment,
+)
 
 logger = logging.getLogger(__name__)
 ALARM_KEYS = {
@@ -202,6 +206,20 @@ async def create_intake_submission(
             patient=patient,
     )        
 
+    if appointment is not None:
+        notify_clinic_new_appointment(
+        appointment=appointment,
+        patient=patient,
+    )
+
+    if appointment is not None:
+        notify_patient_new_appointment(
+        appointment=appointment,
+        patient=patient,
+        whatsapp_consent=(
+            submission.whatsapp_consent
+        ),
+    )    
     return IntakeSubmissionResponse(
         submission_id=str(submission.id),
         patient_id=str(patient.id),
@@ -210,4 +228,3 @@ async def create_intake_submission(
         excel=excel_result,
         message=response_message,
     )
-

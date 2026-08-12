@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_whatsapp_from: str | None = None
-    clinic_whatsapp_to: str | None = None
-
+    twilio_whatsapp_clinic: str | None = None
+   
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -42,3 +42,4 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
