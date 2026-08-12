@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+.env.docker
 credentials/
 .pytest_cache/
 .vscode/
