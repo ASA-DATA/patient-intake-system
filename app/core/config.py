@@ -10,7 +10,10 @@ class Settings(BaseSettings):
 
     database_url: str
     frontend_url: str = "http://localhost:5173"
+    professional_frontend_url: str = "http://localhost:5174"
+    PROFESSIONAL_FRONTEND_URL: str="https://nice-tree-012345678.azurestaticapps.net"
 
+    
     clinic_timezone: str = "America/Mexico_City"
     appointment_duration_minutes: int = 60
     opening_hour: int = 7
