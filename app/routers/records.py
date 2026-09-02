@@ -8,6 +8,8 @@ from app.models.patient import Patient
 from app.models.intake import IntakeSubmission
 from app.models.appointment import Appointment
 
+from datetime import timedelta
+
 router = APIRouter(
     prefix="/api/records",
     tags=["Records"],
@@ -51,8 +53,8 @@ async def get_records_by_date(
         patients_query = (
             select(Patient)
             .where(
-                Patient.created_at >= start_datetime,
-                Patient.created_at < end_datetime,
+                Patient.created_at >= start_datetime - timedelta(days=10),
+                Patient.created_at <= end_datetime,
             )
             .order_by(Patient.created_at)
         )
@@ -70,8 +72,8 @@ async def get_records_by_date(
         intake_query = (
             select(IntakeSubmission)
             .where(
-                IntakeSubmission.created_at >= start_datetime,
-                IntakeSubmission.created_at < end_datetime,
+                IntakeSubmission.created_at >= start_datetime - timedelta(days=10),
+                IntakeSubmission.created_at <= end_datetime,
             )
             .order_by(IntakeSubmission.created_at)
         )
@@ -90,7 +92,7 @@ async def get_records_by_date(
             select(Appointment)
             .where(
                 Appointment.starts_at >= start_datetime,
-                Appointment.starts_at < end_datetime,
+                Appointment.starts_at <= end_datetime,
             )
             .order_by(Appointment.starts_at)
         )

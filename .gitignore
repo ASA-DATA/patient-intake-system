@@ -9,3 +9,5 @@ credentials/
 
 credentials/*
 !credentials/.gitkeep
+
+github-federated.json

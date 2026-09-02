@@ -50,4 +50,5 @@ jobs:
           az containerapp update \
             --name $CONTAINER_APP \
             --resource-group $RESOURCE_GROUP \
-            --image $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}
+            --image $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }} \
+            --set-env-vars APP_ENV=production DEBUG=false

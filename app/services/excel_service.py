@@ -9,6 +9,9 @@ from app.models.appointment import Appointment
 from app.models.intake import IntakeSubmission
 from app.models.patient import Patient
 
+import re
+import unicodedata
+
 
 SECTION_TITLES = {
     "consultation_reason": "Motivo de consulta",
@@ -19,7 +22,6 @@ SECTION_TITLES = {
     "alarm_signs": "Signos de alarma",
     "patient_goals": "Objetivos del paciente",
 }
-
 
 def format_value(value: Any) -> str:
     if value is None:
@@ -32,7 +34,6 @@ def format_value(value: Any) -> str:
         return ", ".join(str(item) for item in value)
 
     return str(value)
-
 
 def create_patient_workbook(
     patient: Patient,
@@ -137,10 +138,6 @@ def create_patient_workbook(
     output.seek(0)
 
     return output.getvalue()
-
-import re
-import unicodedata
-
 
 def create_safe_filename(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)

@@ -78,17 +78,9 @@ class AppointmentResult(BaseModel):
     status: Literal["not_requested", "confirmed"]
     starts_at: datetime | None = None
     ends_at: datetime | None = None
-class ExcelUploadResult(BaseModel):
-    status: Literal["uploaded", "failed"]
-    filename: str
-    file_id: str | None = None
-    web_view_link: str | None = None
-    error: str | None = None    
+ 
 class IntakeSubmissionResponse(BaseModel):
     submission_id: str
     patient_id: str
     appointment: AppointmentResult
     alarm_flag: bool
-    message: str
-    excel: ExcelUploadResult
-    message: str    
