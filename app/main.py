@@ -45,4 +45,3 @@ async def database_health() -> dict[str, str]:
     return {
         "database": "connected",
     }
-#lil proof

@@ -1,49 +1,3 @@
-import logging
-from typing import Any
-
-from fastapi import HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.appointment import (
-    Appointment,
-    AppointmentStatus,
-)
-from app.models.intake import IntakeSubmission
-from app.models.patient import Patient
-from app.schemas.intake import (
-     AppointmentResult,
-    IntakeSubmissionRequest,
-    IntakeSubmissionResponse,
-)
-from app.services.availability import validate_requested_slot
-
-from app.services.calendar_service import (
-    sync_new_appointment_to_calendar,
-)
-from app.services.whatsapp_service import (
-    notify_clinic_new_appointment,
-    notify_patient_new_appointment,
-)
-
-logger = logging.getLogger(__name__)
-ALARM_KEYS = {
-    "perdida_fuerza",
-    "hormigueo_entumecimiento",
-    "perdida_control_esfinteres",
-    "signos_sistemicos",
-}
-
-def calculate_alarm_flag(
-    answers: dict[str, dict[str, Any]],
-) -> bool:
-    alarm_answers = answers.get("signos_alarma", {})
-
-    return any(
-        alarm_answers.get(key) is True
-        for key in ALARM_KEYS
-    )
-
 async def create_intake_submission(
     db: AsyncSession,
     payload: IntakeSubmissionRequest,
@@ -161,8 +115,30 @@ async def create_intake_submission(
                 "Seleccione uno diferente."
             ),
         ) from exc
+    excel_result, response_message = (
+    await generate_and_upload_intake_excel(
+        db=db,
+        patient=patient,
+        submission=submission,
+        appointment=appointment,
+    )
+)
+    # AQUÍ VA LA SINCRONIZACIÓN CON agenda.xlsx
+    if appointment is not None:
+        try:
+            sync_new_appointment_to_agenda(
+            appointment=appointment,
+            patient=patient,
+            expediente_url=submission.excel_web_view_link,
+        )
 
-    # Sincronizacion a calendar
+        except Exception:
+            logger.exception(
+            "No fue posible agregar la cita %s "
+            "a agenda.xlsx.",
+            appointment.id,
+        )
+
     if appointment is not None:
         await sync_new_appointment_to_calendar(
             db=db,
@@ -188,5 +164,7 @@ async def create_intake_submission(
         submission_id=str(submission.id),
         patient_id=str(patient.id),
         appointment=appointment_result,
-        alarm_flag=alarm_flag
+        alarm_flag=alarm_flag,
+        excel=excel_result,
+        message=response_message,
     )

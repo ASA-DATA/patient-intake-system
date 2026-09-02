@@ -12,9 +12,7 @@ from app.models.appointment import (
 from app.schemas.appointment import (
     RescheduleAppointmentResponse,CancelAppointmentResponse,
 )
-from app.services.agenda_excel_service import (
-    sync_updated_appointment_to_agenda,
-)
+
 from app.services.availability import (
     validate_requested_slot,
 )
@@ -23,9 +21,6 @@ from zoneinfo import ZoneInfo
 from app.core.config import settings
 from app.models.appointment import Appointment, AppointmentStatus
 from app.schemas.appointment import CancelAppointmentResponse
-from app.services.agenda_excel_service import (
-    sync_updated_appointment_to_agenda,
-)
 from app.services.calendar_service import (
     sync_cancelled_appointment_to_calendar,
     sync_rescheduled_appointment_to_calendar,
@@ -125,13 +120,7 @@ async def reschedule_appointment(
             detail="El nuevo horario ya fue reservado.",
         ) from exc
 
-    try:
-        sync_updated_appointment_to_agenda(
-            appointment=appointment
-        )
-    except Exception:
-        # Luego podemos agregar logger aquí.
-        pass
+
 
     await sync_rescheduled_appointment_to_calendar(
     db=db,
@@ -225,14 +214,7 @@ async def cancel_appointment(
             detail="No fue posible cancelar la cita.",
         ) from exc
 
-    try:
-        sync_updated_appointment_to_agenda(
-            appointment=appointment
-        )
 
-    except Exception:
-        # Después podemos reemplazar esto por logging.
-        pass
     await sync_cancelled_appointment_to_calendar(
     db=db,
     appointment=appointment,
