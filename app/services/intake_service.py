@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -12,7 +11,8 @@ from app.models.appointment import (
 from app.models.intake import IntakeSubmission
 from app.models.patient import Patient
 from app.schemas.intake import (
-     AppointmentResult,
+    AppointmentResult,
+    IntakeAnswers,
     IntakeSubmissionRequest,
     IntakeSubmissionResponse,
 )
@@ -27,27 +27,17 @@ from app.services.whatsapp_service import (
 )
 
 logger = logging.getLogger(__name__)
-ALARM_KEYS = {
-    "perdida_fuerza",
-    "hormigueo_entumecimiento",
-    "perdida_control_esfinteres",
-    "signos_sistemicos",
-}
 
 def calculate_alarm_flag(
-    answers: dict[str, dict[str, Any]],
+    answers: IntakeAnswers,
 ) -> bool:
-    alarm_answers = answers.get("signos_alarma", {})
-
-    return any(
-        alarm_answers.get(key) is True
-        for key in ALARM_KEYS
-    )
+    return any(answers.signos_alarma.model_dump().values())
 
 async def create_intake_submission(
     db: AsyncSession,
     payload: IntakeSubmissionRequest,
 ) -> IntakeSubmissionResponse:
+    
     appointment_requested = payload.appointment.requested
     requested_start = payload.appointment.starts_at
 
@@ -72,6 +62,7 @@ async def create_intake_submission(
         )
 
     alarm_flag = calculate_alarm_flag(payload.answers)
+    answers = payload.answers.model_dump(mode="json")
 
     patient: Patient
     submission: IntakeSubmission
@@ -93,7 +84,7 @@ async def create_intake_submission(
             submission = IntakeSubmission(
                 patient_id=patient.id,
                 assessment_date=payload.patient.assessment_date,
-                answers=payload.answers,
+                answers=answers,
                 alarm_flag=alarm_flag,
                 privacy_consent=payload.consents.privacy_consent,
                 whatsapp_consent=payload.consents.whatsapp_consent,
