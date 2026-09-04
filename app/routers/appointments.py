@@ -29,8 +29,7 @@ router = APIRouter(
     prefix="/api/appointments",
     tags=["Appointments"],
 )
-
-
+# Approved endpoint
 @router.get(
     "/by-date",
     response_model=PaginatedAppointmentsResponse,
@@ -91,7 +90,6 @@ async def get_appointments_by_date(
         total_pages=(total + page_size - 1) // page_size,
     )
 
-
 @router.get(
     "/availability",
     response_model=AvailabilityResponse,
@@ -133,4 +131,3 @@ async def cancel(
         db=db,
         appointment_id=appointment_id,
     )
-

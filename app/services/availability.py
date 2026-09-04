@@ -10,9 +10,11 @@ from app.schemas.appointment import AvailableSlot
 
 from fastapi import HTTPException, status
 
+#Approved function
 async def get_available_slots(
     db: AsyncSession,
 ) -> list[AvailableSlot]:
+
     clinic_timezone = ZoneInfo(settings.clinic_timezone)
     now = datetime.now(clinic_timezone)
 
@@ -93,7 +95,7 @@ async def get_available_slots(
 
     return available_slots
 
-from fastapi import HTTPException, status
+#Approved function
 def validate_requested_slot(
     starts_at: datetime,
 ) -> tuple[datetime, datetime]:

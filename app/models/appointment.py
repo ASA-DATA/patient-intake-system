@@ -35,7 +35,6 @@ class AppointmentStatus(str, enum.Enum):
     cancelled = "cancelled"
     completed = "completed"
 
-
 class Appointment(Base):
     __tablename__ = "appointments"
 

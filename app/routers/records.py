@@ -22,13 +22,11 @@ router = APIRouter(
     tags=["Records"],
 )
 
-
 def model_to_dict(obj):
     return {
         column.name: getattr(obj, column.name)
         for column in obj.__table__.columns
     }
-
 
 @router.get(
     "",
@@ -91,6 +89,60 @@ async def get_records(
         total_pages=(total + page_size - 1) // page_size,
     )
 
+# Approved function
+@router.get(
+    "/{submission_id}",
+    response_model=RecordDetailResponse,
+)
+async def get_record_detail(
+    submission_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> RecordDetailResponse:
+    detail_query = (
+        select(
+            Patient.id.label("patient_id"),
+            Patient.full_name,
+            Patient.age,
+            Patient.sex,
+            Patient.occupation,
+            Patient.phone,
+            IntakeSubmission.id.label("submission_id"),
+            IntakeSubmission.assessment_date,
+            IntakeSubmission.answers,
+            IntakeSubmission.alarm_flag,
+        )
+        .select_from(IntakeSubmission)
+        .join(Patient, Patient.id == IntakeSubmission.patient_id)
+        .where(IntakeSubmission.id == submission_id)
+    )
+    row = (await db.execute(detail_query)).mappings().one_or_none()
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró la valoración seleccionada.",
+        )
+
+    patient = RecordPatientDetail(
+        patient_id=row["patient_id"],
+        full_name=row["full_name"],
+        age=row["age"],
+        sex=row["sex"],
+        occupation=row["occupation"],
+        phone=row["phone"],
+    )
+    submission = RecordSubmissionDetail(
+        submission_id=row["submission_id"],
+        patient_id=row["patient_id"],
+        assessment_date=row["assessment_date"],
+        answers=row["answers"],
+        alarm_flag=row["alarm_flag"],
+    )
+
+    return RecordDetailResponse(
+        patient=patient,
+        submission=submission,
+    )
 
 @router.get(
     "/by-date",
@@ -194,58 +246,3 @@ async def get_records_by_date(
             for appointment in appointments
         ]
     }
-
-
-@router.get(
-    "/{submission_id}",
-    response_model=RecordDetailResponse,
-)
-async def get_record_detail(
-    submission_id: UUID,
-    db: AsyncSession = Depends(get_db),
-) -> RecordDetailResponse:
-    detail_query = (
-        select(
-            Patient.id.label("patient_id"),
-            Patient.full_name,
-            Patient.age,
-            Patient.sex,
-            Patient.occupation,
-            Patient.phone,
-            IntakeSubmission.id.label("submission_id"),
-            IntakeSubmission.assessment_date,
-            IntakeSubmission.answers,
-            IntakeSubmission.alarm_flag,
-        )
-        .select_from(IntakeSubmission)
-        .join(Patient, Patient.id == IntakeSubmission.patient_id)
-        .where(IntakeSubmission.id == submission_id)
-    )
-    row = (await db.execute(detail_query)).mappings().one_or_none()
-
-    if row is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No se encontró la valoración seleccionada.",
-        )
-
-    patient = RecordPatientDetail(
-        patient_id=row["patient_id"],
-        full_name=row["full_name"],
-        age=row["age"],
-        sex=row["sex"],
-        occupation=row["occupation"],
-        phone=row["phone"],
-    )
-    submission = RecordSubmissionDetail(
-        submission_id=row["submission_id"],
-        patient_id=row["patient_id"],
-        assessment_date=row["assessment_date"],
-        answers=row["answers"],
-        alarm_flag=row["alarm_flag"],
-    )
-
-    return RecordDetailResponse(
-        patient=patient,
-        submission=submission,
-    )

@@ -156,10 +156,12 @@ async def reschedule_appointment(
     message="Cita reagendada correctamente.",
 )
 
+#Approved function
 async def cancel_appointment(
     db: AsyncSession,
     appointment_id: UUID,
 ) -> CancelAppointmentResponse:
+    
     statement = select(Appointment).where(
         Appointment.id == appointment_id
     )
