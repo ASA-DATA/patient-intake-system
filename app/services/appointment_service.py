@@ -54,10 +54,13 @@ async def reschedule_appointment(
             detail="Cita no encontrada.",
         )
 
-    if appointment.status == AppointmentStatus.cancelled:
+    if appointment.status not in (
+        AppointmentStatus.pending,
+        AppointmentStatus.confirmed,
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="No se puede reagendar una cita cancelada.",
+            detail="No se puede reagendar una cita finalizada.",
         )
 
     patient_result = await db.execute(
@@ -175,10 +178,14 @@ async def cancel_appointment(
             detail="Cita no encontrada.",
         )
 
-    if appointment.status == AppointmentStatus.cancelled:
+
+    if appointment.status not in (
+        AppointmentStatus.pending,
+        AppointmentStatus.confirmed,
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="La cita ya está cancelada.",
+            detail="No se puede cancelar una cita finalizada.",
         )
 
     # AQUÍ
