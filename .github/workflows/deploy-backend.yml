@@ -1,13 +1,20 @@
-name: Deploy Backend to Azure Container Apps
+name: Validate, migrate, and deploy backend
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - develop
+      - main
 
 permissions:
-  id-token: write
   contents: read
+
+concurrency:
+  group: backend-production
+  cancel-in-progress: false
 
 env:
   ACR_NAME: patientintakeacr2026
@@ -15,16 +22,93 @@ env:
   IMAGE_NAME: patient-intake-backend
   RESOURCE_GROUP: patient-intake-system-rg
   CONTAINER_APP: patient-intake-api
+  MIGRATION_JOB: patient-intake-migrate
+  EXPECTED_TRAFFIC_WEIGHT: "100"
 
 jobs:
-  build-and-deploy:
+  validate:
     runs-on: ubuntu-latest
+    env:
+      APP_ENV: test
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/patient_intake_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: patient_intake_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d patient_intake_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall app alembic tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Require a single Alembic head
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          heads="$(python -m alembic heads)"
+          head_count="$(printf '%s\n' "$heads" | grep -c '(head)' || true)"
+
+          if [[ "$head_count" -ne 1 ]]; then
+            echo "::error::Expected exactly one Alembic head, found $head_count."
+            printf '%s\n' "$heads"
+            exit 1
+          fi
+
+          printf '%s\n' "$heads"
+
+      - name: Apply migrations to temporary PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m alembic upgrade head
+          python -m alembic current --check-heads
+
+  build-and-publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build immutable Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${{ github.sha }}"
+          docker build --tag "$image" .
+
       - name: Login to Azure
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -32,23 +116,417 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to ACR
-        run: az acr login --name $ACR_NAME
-
-      - name: Build Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
         run: |
-          docker build \
-            -t $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }} \
-            .
+          set -euo pipefail
+          az acr login --name "$ACR_NAME"
 
-      - name: Push Docker image
+      - name: Publish immutable Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
         run: |
-          docker push \
-            $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}
+          set -euo pipefail
+          image="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${{ github.sha }}"
+          docker push "$image"
 
-      - name: Deploy to Azure Container Apps
+  migrate:
+    needs: build-and-publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install current Container Apps CLI extension
+        shell: bash
         run: |
+          set -euo pipefail
+          az extension add --name containerapp --upgrade --yes
+
+      - name: Validate migration job configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          provisioning_guide="docs/azure-backend-deployment.md"
+          job_json="$RUNNER_TEMP/migration-job.json"
+          app_json="$RUNNER_TEMP/backend-app.json"
+
+          fail_configuration() {
+            echo "::error::$1 Follow $provisioning_guide to provision or repair $MIGRATION_JOB."
+            exit 1
+          }
+
+          require_equal() {
+            local actual="$1"
+            local expected="$2"
+            local label="$3"
+            if [[ "$actual" != "$expected" ]]; then
+              fail_configuration "$label must be '$expected' (found '${actual:-missing}')."
+            fi
+          }
+
+          require_value() {
+            local actual="$1"
+            local label="$2"
+            if [[ -z "$actual" || "$actual" == "null" ]]; then
+              fail_configuration "$label is missing."
+            fi
+          }
+
+          require_assigned_identity() {
+            local identity="$1"
+            local label="$2"
+
+            if [[ "$identity" == "system" ]]; then
+              if [[ "$identity_type" != *"SystemAssigned"* ]]; then
+                fail_configuration "$label refers to the system identity, but that identity is not assigned to the job."
+              fi
+              return
+            fi
+
+            if ! jq -e --arg identity "$identity" \
+              '.identity.userAssignedIdentities != null and (.identity.userAssignedIdentities | has($identity))' \
+              "$job_json" > /dev/null; then
+              fail_configuration "$label is not assigned to the migration job."
+            fi
+          }
+
+          if ! az containerapp job show \
+            --name "$MIGRATION_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json > "$job_json"; then
+            fail_configuration "Migration job '$MIGRATION_JOB' does not exist or is not readable."
+          fi
+
+          if ! az containerapp show \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json > "$app_json"; then
+            fail_configuration "Backend Container App '$CONTAINER_APP' does not exist or is not readable."
+          fi
+
+          trigger_type="$(jq -r '.properties.configuration.triggerType // empty' "$job_json")"
+          parallelism="$(jq -r '.properties.configuration.manualTriggerConfig.parallelism // empty' "$job_json")"
+          completion_count="$(jq -r '.properties.configuration.manualTriggerConfig.replicaCompletionCount // empty' "$job_json")"
+          replica_timeout="$(jq -r '.properties.configuration.replicaTimeout // empty' "$job_json")"
+          retry_limit="$(jq -r '.properties.configuration.replicaRetryLimit // empty' "$job_json")"
+          job_environment="$(jq -r '.properties.environmentId // empty' "$job_json")"
+          app_environment="$(jq -r '.properties.environmentId // empty' "$app_json")"
+          container_count="$(jq -r '.properties.template.containers | length' "$job_json")"
+          container_name="$(jq -r '.properties.template.containers[0].name // empty' "$job_json")"
+          job_image="$(jq -r '.properties.template.containers[0].image // empty' "$job_json")"
+          command="$(jq -r '(.properties.template.containers[0].command // []) | join(" ")' "$job_json")"
+          arguments="$(jq -r '(.properties.template.containers[0].args // []) | join(" ")' "$job_json")"
+          database_secret_ref="$(jq -r '.properties.template.containers[0].env[]? | select(.name == "DATABASE_URL") | .secretRef // empty' "$job_json")"
+          database_key_vault_url="$(jq -r '.properties.configuration.secrets[]? | select(.name == "database-url") | .keyVaultUrl // empty' "$job_json")"
+          database_key_vault_identity="$(jq -r '.properties.configuration.secrets[]? | select(.name == "database-url") | .identity // empty' "$job_json")"
+          registry_identity="$(jq -r --arg server "$ACR_LOGIN_SERVER" '.properties.configuration.registries[]? | select(.server == $server) | .identity // empty' "$job_json")"
+          identity_type="$(jq -r '.identity.type // empty' "$job_json")"
+
+          require_equal "$trigger_type" "Manual" "Trigger type"
+          require_equal "$parallelism" "1" "Parallelism"
+          require_equal "$completion_count" "1" "Replica completion count"
+          require_equal "$replica_timeout" "1800" "Replica timeout"
+          require_equal "$retry_limit" "0" "Replica retry limit"
+          require_equal "$job_environment" "$app_environment" "Container Apps environment"
+          require_equal "$container_count" "1" "Container count"
+          require_equal "$container_name" "migration" "Migration container name"
+          require_equal "$command" "/bin/sh" "Migration command"
+          require_equal "$arguments" "-c alembic upgrade head && alembic current --check-heads" "Migration arguments"
+          require_equal "$database_secret_ref" "database-url" "DATABASE_URL secret reference"
+          require_value "$database_key_vault_url" "Key Vault reference for database-url"
+          require_value "$database_key_vault_identity" "Key Vault identity for database-url"
+          require_value "$registry_identity" "Managed identity for ACR"
+
+          if [[ "$identity_type" != *"SystemAssigned"* && "$identity_type" != *"UserAssigned"* ]]; then
+            fail_configuration "The migration job must have a managed identity."
+          fi
+
+          require_assigned_identity "$registry_identity" "ACR identity"
+          require_assigned_identity "$database_key_vault_identity" "Key Vault identity"
+
+          expected_image_repository="$ACR_LOGIN_SERVER/$IMAGE_NAME"
+          if [[ "$job_image" != "$expected_image_repository:"* && "$job_image" != "$expected_image_repository@"* ]]; then
+            fail_configuration "The migration job image must use the backend ACR repository."
+          fi
+
+          echo "Migration job configuration is valid."
+
+      - name: Run database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${{ github.sha }}"
+
+          az containerapp job update \
+            --name "$MIGRATION_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$image" \
+            --output none
+
+          configured_image="$(az containerapp job show \
+            --name "$MIGRATION_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query 'properties.template.containers[0].image' \
+            --output tsv)"
+
+          if [[ "$configured_image" != "$image" ]]; then
+            echo "::error::Migration job did not retain the requested immutable image."
+            exit 1
+          fi
+
+          execution_name="$(az containerapp job start \
+            --name "$MIGRATION_JOB" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query name \
+            --output tsv)"
+
+          if [[ -z "$execution_name" ]]; then
+            echo "::error::Azure did not return a migration execution name."
+            exit 1
+          fi
+
+          echo "Migration execution: $execution_name"
+
+          show_safe_diagnostics() {
+            az containerapp job execution show \
+              --name "$MIGRATION_JOB" \
+              --resource-group "$RESOURCE_GROUP" \
+              --job-execution-name "$execution_name" \
+              --query '{name:name,status:properties.status,startTime:properties.startTime,endTime:properties.endTime}' \
+              --output jsonc || true
+            echo "Container output was not printed automatically because it could contain sensitive application diagnostics."
+            echo "After checking log-scrubbing policy, inspect it with: az containerapp job logs show --name $MIGRATION_JOB --resource-group $RESOURCE_GROUP --execution $execution_name --container migration --tail 100"
+          }
+
+          migration_succeeded=false
+          for attempt in $(seq 1 120); do
+            execution_status="$(az containerapp job execution show \
+              --name "$MIGRATION_JOB" \
+              --resource-group "$RESOURCE_GROUP" \
+              --job-execution-name "$execution_name" \
+              --query properties.status \
+              --output tsv 2>/dev/null || true)"
+
+            case "$execution_status" in
+              Succeeded)
+                migration_succeeded=true
+                break
+                ;;
+              Failed|Stopped|Canceled)
+                echo "::error::Migration execution $execution_name ended with status $execution_status. The application was not deployed."
+                show_safe_diagnostics
+                exit 1
+                ;;
+            esac
+
+            sleep 15
+          done
+
+          if [[ "$migration_succeeded" != "true" ]]; then
+            echo "::error::Timed out waiting 30 minutes for migration execution $execution_name. The application was not deployed."
+            show_safe_diagnostics
+            exit 1
+          fi
+
+          echo "Migration execution $execution_name succeeded."
+
+  deploy:
+    needs: migrate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Capture current production revision
+        id: previous
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          previous_revision="$(az containerapp show \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query properties.latestReadyRevisionName \
+            --output tsv)"
+
+          previous_image=""
+          if [[ -n "$previous_revision" ]]; then
+            previous_image="$(az containerapp revision show \
+              --name "$CONTAINER_APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --revision "$previous_revision" \
+              --query 'properties.template.containers[0].image' \
+              --output tsv)"
+          fi
+
+          echo "revision=$previous_revision" >> "$GITHUB_OUTPUT"
+          echo "image=$previous_image" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy immutable image to Azure Container Apps
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${{ github.sha }}"
           az containerapp update \
-            --name $CONTAINER_APP \
-            --resource-group $RESOURCE_GROUP \
-            --image $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }} \
-            --set-env-vars APP_ENV=production DEBUG=false
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$image" \
+            --set-env-vars APP_ENV=production DEBUG=false \
+            --output none
+
+      - name: Verify deployed revision and readiness
+        shell: bash
+        env:
+          PREVIOUS_REVISION: ${{ steps.previous.outputs.revision }}
+          PREVIOUS_IMAGE: ${{ steps.previous.outputs.image }}
+        run: |
+          set -euo pipefail
+
+          image="${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${{ github.sha }}"
+          revision_json="$RUNNER_TEMP/deployed-revision.json"
+          app_json="$RUNNER_TEMP/deployed-app.json"
+
+          fail_deployment() {
+            echo "::error::$1"
+            echo "No database downgrade or automatic rollback was attempted."
+            if [[ -n "$PREVIOUS_REVISION" ]]; then
+              echo "To restore traffic after review: az containerapp ingress traffic set --name $CONTAINER_APP --resource-group $RESOURCE_GROUP --revision-weight $PREVIOUS_REVISION=100"
+            fi
+            if [[ -n "$PREVIOUS_IMAGE" ]]; then
+              echo "To create a revision from the previous immutable image after review: az containerapp update --name $CONTAINER_APP --resource-group $RESOURCE_GROUP --image $PREVIOUS_IMAGE"
+            fi
+            exit 1
+          }
+
+          revision_ready=false
+          latest_revision=""
+          for attempt in $(seq 1 30); do
+            latest_revision="$(az containerapp show \
+              --name "$CONTAINER_APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query properties.latestRevisionName \
+              --output tsv 2>/dev/null || true)"
+
+            if [[ -n "$latest_revision" ]] && az containerapp revision show \
+              --name "$CONTAINER_APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --revision "$latest_revision" \
+              --output json > "$revision_json" 2>/dev/null; then
+              provisioning_state="$(jq -r '.properties.provisioningState // empty' "$revision_json")"
+              deployed_image="$(jq -r '.properties.template.containers[0].image // empty' "$revision_json")"
+              deployed_app_env="$(jq -r '.properties.template.containers[0].env[]? | select(.name == "APP_ENV") | .value // empty' "$revision_json")"
+              deployed_debug="$(jq -r '.properties.template.containers[0].env[]? | select(.name == "DEBUG") | .value // empty' "$revision_json")"
+
+              if [[ "$provisioning_state" == "Failed" ]]; then
+                fail_deployment "Revision $latest_revision failed to provision."
+              fi
+
+              if [[ "$provisioning_state" == "Provisioned" && "$deployed_image" == "$image" ]]; then
+                if [[ "$deployed_app_env" != "production" || "$deployed_debug" != "false" ]]; then
+                  fail_deployment "Revision $latest_revision does not retain APP_ENV=production and DEBUG=false."
+                fi
+
+                latest_ready_revision="$(az containerapp show \
+                  --name "$CONTAINER_APP" \
+                  --resource-group "$RESOURCE_GROUP" \
+                  --query properties.latestReadyRevisionName \
+                  --output tsv)"
+
+                if [[ "$latest_ready_revision" == "$latest_revision" ]]; then
+                  revision_ready=true
+                  break
+                fi
+              fi
+            fi
+
+            sleep 10
+          done
+
+          if [[ "$revision_ready" != "true" ]]; then
+            fail_deployment "The new SHA revision did not become ready within five minutes. Latest revision: ${latest_revision:-unknown}."
+          fi
+
+          traffic_ready=false
+          traffic_weight="0"
+          for attempt in $(seq 1 12); do
+            traffic_weight="$(az containerapp revision show \
+              --name "$CONTAINER_APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --revision "$latest_revision" \
+              --query properties.trafficWeight \
+              --output tsv 2>/dev/null || true)"
+
+            if [[ "$traffic_weight" == "$EXPECTED_TRAFFIC_WEIGHT" ]]; then
+              traffic_ready=true
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [[ "$traffic_ready" != "true" ]]; then
+            fail_deployment "Revision $latest_revision has traffic weight $traffic_weight; expected $EXPECTED_TRAFFIC_WEIGHT."
+          fi
+
+          az containerapp show \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --output json > "$app_json"
+
+          fqdn="$(jq -r '.properties.configuration.ingress.fqdn // empty' "$app_json")"
+          if [[ -z "$fqdn" ]]; then
+            fail_deployment "The Container App does not expose an ingress FQDN for health checks."
+          fi
+
+          endpoints_ready=false
+          health_status="000"
+          readiness_status="000"
+          for attempt in $(seq 1 12); do
+            health_status="$(curl --silent --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --max-time 10 \
+              "https://$fqdn/health" || true)"
+            readiness_status="$(curl --silent --show-error \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --max-time 10 \
+              "https://$fqdn/ready" || true)"
+
+            if [[ "$health_status" == "200" && "$readiness_status" == "200" ]]; then
+              endpoints_ready=true
+              break
+            fi
+
+            sleep 10
+          done
+
+          if [[ "$endpoints_ready" != "true" ]]; then
+            fail_deployment "Post-deployment checks failed after limited retries (/health=$health_status, /ready=$readiness_status). Revision: $latest_revision."
+          fi
+
+          echo "Revision $latest_revision is provisioned, uses $image, receives $traffic_weight% traffic, and passed /health plus /ready."
