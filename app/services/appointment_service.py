@@ -54,6 +54,12 @@ async def reschedule_appointment(
             detail="Cita no encontrada.",
         )
 
+    if appointment.status == AppointmentStatus.cancelled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No se puede reagendar una cita cancelada.",
+        )
+
     if appointment.status not in (
         AppointmentStatus.pending,
         AppointmentStatus.confirmed,
@@ -178,6 +184,12 @@ async def cancel_appointment(
             detail="Cita no encontrada.",
         )
 
+
+    if appointment.status == AppointmentStatus.cancelled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La cita ya está cancelada.",
+        )
 
     if appointment.status not in (
         AppointmentStatus.pending,
