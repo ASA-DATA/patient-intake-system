@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.intake import IntakeSubmission
-from app.models.appointment import Appointment
 from app.models.patient import Patient
 from app.schemas.records import (
     PaginatedRecordsResponse,
@@ -21,12 +20,6 @@ router = APIRouter(
     prefix="/api/records",
     tags=["Records"],
 )
-
-def model_to_dict(obj):
-    return {
-        column.name: getattr(obj, column.name)
-        for column in obj.__table__.columns
-    }
 
 @router.get(
     "",
@@ -89,7 +82,6 @@ async def get_records(
         total_pages=(total + page_size - 1) // page_size,
     )
 
-# Keep the static /by-date route before the dynamic UUID route.
 @router.get(
     "/{submission_id}",
     response_model=RecordDetailResponse,
