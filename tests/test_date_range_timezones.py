@@ -74,21 +74,15 @@ class DateRangeTimezoneTests(unittest.IsolatedAsyncioTestCase):
                 for call in self.db.execute.call_args_list:
                     self.assert_bounds(call.args[0], lower, upper)
 
-    async def test_legacy_records_uses_aware_bounds_and_preserves_lookback(self):
-        rows = Mock()
-        rows.scalars.return_value.all.return_value = []
-        self.db.execute.side_effect = [rows, rows, rows]
-        with patch.object(settings, "clinic_timezone", "America/New_York"):
-            response = await self.request("/api/records/by-date", "2026-03-08", "2026-03-08")
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["appointments"], [])
-        self.assertEqual(self.db.execute.await_count, 3)
-        for call in self.db.execute.call_args_list[:2]:
-            self.assert_bounds(call.args[0], "2026-02-26T05:00:00+00:00", "2026-03-09T04:00:00+00:00")
-        self.assert_bounds(self.db.execute.call_args_list[2].args[0], "2026-03-08T05:00:00+00:00", "2026-03-09T04:00:00+00:00")
+    def test_api_schema_exposes_current_routes_without_legacy_records(self):
+        paths = self.app.openapi()["paths"]
+        self.assertNotIn("/api/records/by-date", paths)
+        self.assertIn("get", paths["/api/records"])
+        self.assertIn("get", paths["/api/appointments/by-date"])
+        self.db.execute.assert_not_called()
 
     async def test_invalid_ranges_rejected_before_database_access(self):
-        for path in ("/api/records", "/api/records/by-date", "/api/appointments/by-date"):
+        for path in ("/api/records", "/api/appointments/by-date"):
             with self.subTest(path=path):
                 response = await self.request(path, "2026-01-02", "2026-01-01")
                 self.assertEqual(response.status_code, 400)

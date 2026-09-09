@@ -55,9 +55,10 @@ El Dockerfile instala el mismo archivo con pip 25.2 y ejecuta `pip check`.
 El flujo existente `deploy-backend.yml` ya construye ese Dockerfile, por lo
 que no necesita otro paso de instalación. `test-dependencies.yml` verifica
 instalación, conflictos y pruebas en Python 3.13 sobre Linux y Windows, sin
-credenciales de servicios. No se requieren pytest ni herramientas de bloqueo
-adicionales. La imagen base sigue siendo `python:3.13-slim`: este archivo fija
-paquetes Python, no el contenido del sistema operativo ni el digest de Docker.
+credenciales de servicios. Un fallo en una plataforma no cancela el trabajo
+de la otra. No se requieren pytest ni herramientas de bloqueo adicionales.
+La imagen base sigue siendo `python:3.13-slim`: este archivo fija paquetes
+Python, no el contenido del sistema operativo ni el digest de Docker.
 
 ## Pruebas sin servicios externos
 
@@ -107,11 +108,14 @@ plataformas; este conjunto se mantiene para Python 3.13.
 
 ## Rangos de fechas
 
-`/api/appointments/by-date` y el endpoint heredado `/api/records/by-date`
-interpretan las fechas como días de `CLINIC_TIMEZONE`. Las consultas de
-columnas con zona horaria reciben límites con zona: desde la medianoche
-inicial (incluida) hasta la medianoche posterior al día final (excluida).
+`/api/appointments/by-date` interpreta las fechas como días de
+`CLINIC_TIMEZONE`. Las consultas de columnas con zona horaria reciben límites
+con zona: desde la medianoche inicial (incluida) hasta la medianoche posterior
+al día final (excluida).
 Esto evita depender de la zona del servidor e incluye días de 23 o 25 horas
-cuando cambia el horario estacional. Se conserva el margen heredado de diez
-días para pacientes y valoraciones. `/api/records` filtra `assessment_date`,
+cuando cambia el horario estacional. `/api/records` filtra `assessment_date`,
 que es una fecha sin hora, y conserva sus límites de fecha inclusivos.
+
+El endpoint heredado `/api/records/by-date` se retiró intencionalmente.
+Usar `/api/records` para consultar valoraciones y `/api/appointments/by-date`
+para consultar citas; ambos endpoints devuelven resultados paginados.
