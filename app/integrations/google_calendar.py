@@ -1,4 +1,9 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from googleapiclient.discovery import build
+
+from app.core.config import settings
 
 from app.integrations.google_auth import (
     get_google_credentials,
@@ -26,26 +31,28 @@ def list_calendars():
 
     return calendars
 
+def _event_time(value: datetime) -> dict[str, str]:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("La fecha del evento debe incluir zona horaria.")
+    return {
+        "dateTime": value.astimezone(ZoneInfo(settings.clinic_timezone)).isoformat(),
+        "timeZone": settings.clinic_timezone,
+    }
+
+
 def create_calendar_event(
     summary: str,
     description: str,
-    starts_at,
-    ends_at,
+    starts_at: datetime,
+    ends_at: datetime,
 ) -> dict:
-    service = get_calendar_service()
-
     event = {
         "summary": summary,
         "description": description,
-        "start": {
-            "dateTime": starts_at.isoformat(),
-            "timeZone": "America/Mexico_City",
-        },
-        "end": {
-            "dateTime": ends_at.isoformat(),
-            "timeZone": "America/Mexico_City",
-        },
+        "start": _event_time(starts_at),
+        "end": _event_time(ends_at),
     }
+    service = get_calendar_service()
 
     created_event = (
         service.events()
@@ -64,9 +71,11 @@ def create_calendar_event(
 
 def update_calendar_event(
     event_id: str,
-    starts_at,
-    ends_at,
+    starts_at: datetime,
+    ends_at: datetime,
 ) -> dict:
+    start = _event_time(starts_at)
+    end = _event_time(ends_at)
     service = get_calendar_service()
 
     # Recuperamos primero el evento completo.
@@ -79,15 +88,8 @@ def update_calendar_event(
         .execute()
     )
 
-    event["start"] = {
-        "dateTime": starts_at.isoformat(),
-        "timeZone": "America/Mexico_City",
-    }
-
-    event["end"] = {
-        "dateTime": ends_at.isoformat(),
-        "timeZone": "America/Mexico_City",
-    }
+    event["start"] = start
+    event["end"] = end
 
     updated_event = (
         service.events()
