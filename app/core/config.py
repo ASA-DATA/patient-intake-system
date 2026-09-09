@@ -1,5 +1,7 @@
 from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +17,16 @@ class Settings(BaseSettings):
 
     
     clinic_timezone: str = "America/Mexico_City"
+
+    @field_validator("clinic_timezone")
+    @classmethod
+    def validate_clinic_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("CLINIC_TIMEZONE debe ser una zona horaria IANA válida.") from exc
+        return value
+
     appointment_duration_minutes: int = 60
     opening_hour: int = 7
     closing_hour: int = 20

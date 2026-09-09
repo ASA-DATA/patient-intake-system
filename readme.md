@@ -1,5 +1,15 @@
 # Backend: instalación y dependencias
 
+## Zona horaria de la clínica
+
+`CLINIC_TIMEZONE` es la fuente de la zona IANA de la clínica (por defecto
+`America/Mexico_City`). Se valida al iniciar el backend. Calendar usa esa zona
+al crear y actualizar eventos, conservando el instante de las fechas con
+offset; una fecha sin zona se rechaza antes de acceder a Google.
+`GET /api/config` publica únicamente `clinic_timezone` para el frontend
+profesional. Desplegar este endpoint antes del frontend que lo consume.
+Al cambiar la variable, reiniciar el backend y recargar el frontend.
+
 Usar CPython 3.13 (el entorno de referencia es 3.13.7). `requirements.txt`
 contiene versiones exactas de dependencias directas y transitivas para Windows
 y Linux. Se conservaron las versiones del entorno existente, sin actualizar

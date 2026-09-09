@@ -31,6 +31,11 @@ async def root() -> dict[str, str]:
         "environment": settings.app_env,
     }
 
+@app.get("/api/config")
+async def public_config() -> dict[str, str]:
+    return {"clinic_timezone": settings.clinic_timezone}
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {
