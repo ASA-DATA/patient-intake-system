@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,6 +24,7 @@ from app.services.appointment_service import (
     reschedule_appointment,
 )
 from app.services.availability import get_available_slots
+from app.services.date_ranges import clinic_date_bounds
 
 router = APIRouter(
     prefix="/api/appointments",
@@ -47,8 +48,7 @@ async def get_appointments_by_date(
             detail="start_date no puede ser mayor que end_date",
         )
 
-    start_datetime = datetime.combine(start_date, time.min)
-    end_datetime = datetime.combine(end_date + timedelta(days=1), time.min)
+    start_datetime, end_datetime = clinic_date_bounds(start_date, end_date)
     filters = (
         Appointment.starts_at >= start_datetime,
         Appointment.starts_at < end_datetime,

@@ -94,3 +94,14 @@ apuntando a la ruta absoluta de `tests/`, para no cargar ese archivo.
 Si cambia la versión de pip, actualizar también Dockerfile, CI y estos pasos.
 Al cambiar de versión menor de Python, volver a resolver y verificar ambas
 plataformas; este conjunto se mantiene para Python 3.13.
+
+## Rangos de fechas
+
+`/api/appointments/by-date` y el endpoint heredado `/api/records/by-date`
+interpretan las fechas como días de `CLINIC_TIMEZONE`. Las consultas de
+columnas con zona horaria reciben límites con zona: desde la medianoche
+inicial (incluida) hasta la medianoche posterior al día final (excluida).
+Esto evita depender de la zona del servidor e incluye días de 23 o 25 horas
+cuando cambia el horario estacional. Se conserva el margen heredado de diez
+días para pacientes y valoraciones. `/api/records` filtra `assessment_date`,
+que es una fecha sin hora, y conserva sus límites de fecha inclusivos.

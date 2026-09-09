@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -89,7 +89,7 @@ async def get_records(
         total_pages=(total + page_size - 1) // page_size,
     )
 
-# Approved function
+# Keep the static /by-date route before the dynamic UUID route.
 @router.get(
     "/{submission_id}",
     response_model=RecordDetailResponse,
@@ -143,106 +143,3 @@ async def get_record_detail(
         patient=patient,
         submission=submission,
     )
-
-@router.get(
-    "/by-date",
-    deprecated=True,
-    description=(
-        "Endpoint obsoleto conservado temporalmente para el frontend desplegado. "
-        "Debe eliminarse después de desplegar el nuevo frontend paginado."
-    ),
-)
-async def get_records_by_date(
-    start_date: date,
-    end_date: date,
-    db: AsyncSession = Depends(get_db),
-):
-    if start_date > end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date no puede ser mayor que end_date",
-        )
-
-    start_datetime = datetime.combine(
-        start_date,
-        time.min,
-    )
-
-    end_datetime = datetime.combine(
-        end_date + timedelta(days=1),
-        time.min,
-    )
-
-    # =============================
-    # PATIENTS
-    # =============================
-
-    patients_query = (
-        select(Patient)
-        .where(
-            Patient.created_at >= start_datetime - timedelta(days=10),
-            Patient.created_at <= end_datetime,
-        )
-        .order_by(Patient.created_at)
-    )
-
-    patients_result = await db.execute(
-        patients_query
-    )
-
-    patients = patients_result.scalars().all()
-
-    # =============================
-    # INTAKE SUBMISSIONS
-    # =============================
-
-    intake_query = (
-        select(IntakeSubmission)
-        .where(
-            IntakeSubmission.created_at >= start_datetime - timedelta(days=10),
-            IntakeSubmission.created_at <= end_datetime,
-        )
-        .order_by(IntakeSubmission.created_at)
-    )
-
-    intake_result = await db.execute(
-        intake_query
-    )
-
-    intake_submissions = intake_result.scalars().all()
-       
-    # =============================
-    # APPOINTMENT
-    # =============================
-
-    appointment_query = (
-        select(Appointment)
-        .where(
-            Appointment.starts_at >= start_datetime,
-            Appointment.starts_at <= end_datetime,
-        )
-        .order_by(Appointment.starts_at)
-    )
-
-    appointment_result = await db.execute(
-        appointment_query
-    )
-
-    appointments = appointment_result.scalars().all()
-
-    return {
-        "start_date": start_date,
-        "end_date": end_date,
-        "patients": [
-            model_to_dict(patient)
-            for patient in patients
-        ],
-        "intake_submissions": [
-            model_to_dict(submission)
-            for submission in intake_submissions
-        ],
-        "appointments": [
-            model_to_dict(appointment)
-            for appointment in appointments
-        ]
-    }
